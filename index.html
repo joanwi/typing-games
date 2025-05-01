@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>打字母飞机</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/addons/p5.sound.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f8ff;
+    }
+    canvas {
+      border: 5px solid #ff69b4;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+<script>
+// 游戏的全局变量
+let player;      // 玩家飞机对象
+let enemies = []; // 存储所有敌机的数组
+let bullets = []; // 存储所有子弹的数组
+let score = 0;    // 游戏得分
+let gameState = 'loading'; // 游戏状态：'loading'(加载中), 'start'(开始), 'playing'(游戏中), 'gameOver'(游戏结束)
+let startButton = { x: 450, y: 300, w: 150, h: 60 }; // 开始按钮的位置和大小
+
+// 图片资源
+let bgImage;     // 背景图片
+let playerImage; // 玩家飞机图片
+let enemyImage;  // 敌机图片
+let bgMusic;     // 背景音乐
+let loadedImages = 0; // 已加载的图片数量
+let totalImages = 3;  // 需要加载的图片总数
+let loadError = false; // 是否有图片加载错误
+let loadErrorMsg = ''; // 错误信息
+let musicLoaded = false; // 音乐是否加载完成
+
+// 精灵图规格
+let enemySpecs = {
+  spriteWidth: 109,    // 单个敌机宽度
+  spriteHeight: 109,   // 单个敌机高度
+  cols: 3,             // 3列
+  rows: 3,             // 3行
+  // 每个敌机的左上角坐标
+  positions: [
+    {x: 0, y: 0},      // 1号敌机
+    {x: 157, y: 0},    // 2号敌机
+    {x: 284, y: 0},    // 3号敌机
+    {x: 0, y: 119},    // 4号敌机
+    {x: 150, y: 118},  // 5号敌机
+    {x: 293, y: 117},  // 6号敌机
+    {x: 0, y: 240},    // 7号敌机
+    {x: 143, y: 237},  // 8号敌机
+    {x: 286, y: 244}   // 9号敌机
+  ]
+};
+
+/**
+ * 处理图片加载完成的回调
+ */
+function imageLoaded(img) {
+  loadedImages++;
+  console.log('图片加载成功:', img);
+  if (loadedImages === totalImages) {
+    gameState = 'start';
+  }
+}
+
+/**
+ * 处理图片加载失败的回调
+ */
+function imageError(err) {
+  loadError = true;
+  loadErrorMsg = err;
+  console.error('图片加载失败:', err);
+}
+
+/**
+ * preload函数在游戏开始前执行
+ * 用于预加载图片等资源
+ */
+function preload() {
+  try {
+    // 使用相对路径加载图片，并添加加载回调
+    bgImage = loadImage('images/background.png', 
+      (img) => imageLoaded('background.png'),
+      (err) => imageError('background.png: ' + err)
+    );
+    playerImage = loadImage('images/player.png', 
+      (img) => imageLoaded('player.png'),
+      (err) => imageError('player.png: ' + err)
+    );
+    enemyImage = loadImage('images/enemy.png', 
+      (img) => imageLoaded('enemy.png'),
+      (err) => imageError('enemy.png: ' + err)
+    );
+    // 加载背景音乐
+    bgMusic = loadSound('music/background.mp3', 
+      () => {
+        console.log('背景音乐加载成功');
+        musicLoaded = true;
+        bgMusic.setVolume(0.5); // 设置音量
+      },
+      (err) => {
+        console.error('背景音乐加载失败:', err);
+        musicLoaded = false;
+      }
+    );
+  } catch (e) {
+    loadError = true;
+    loadErrorMsg = '加载资源时发生错误: ' + e.message;
+    console.error(loadErrorMsg);
+  }
+}
+
+/**
+ * 从精灵图中获取指定索引的敌机图像
+ */
+function drawEnemySprite(index, x, y, size) {
+  if (!enemyImage || index < 0 || index >= enemySpecs.positions.length) return;
+  
+  const pos = enemySpecs.positions[index];
+  
+  try {
+    // 计算实际绘制尺寸，保持宽高比
+    const aspectRatio = enemySpecs.spriteWidth / enemySpecs.spriteHeight;
+    const drawWidth = size;
+    const drawHeight = size / aspectRatio;
+    
+    // 从精灵图中提取并绘制敌机
+    image(enemyImage, 
+      x - drawWidth/2, y - drawHeight/2, drawWidth, drawHeight,  // 目标位置和大小
+      pos.x, pos.y, enemySpecs.spriteWidth, enemySpecs.spriteHeight  // 源图像位置和大小
+    );
+  } catch (e) {
+    console.error('绘制敌机时出错:', e);
+    // 绘制错误提示
+    fill(255, 0, 0);
+    noStroke();
+    ellipse(x, y, size, size);
+  }
+}
+
+/**
+ * setup函数在游戏开始时只执行一次
+ * 用于初始化游戏的基本设置
+ */
+function setup() {
+  createCanvas(1000, 800);     // 创建游戏画布，设置宽900像素，高600像素
+  textAlign(CENTER, CENTER);  // 设置文字居中对齐
+  textSize(24);              // 设置文字大小为24像素
+  imageMode(CENTER);         // 设置图片绘制模式为居中
+  
+  // 初始化玩家飞机的属性
+  player = {
+    x: width / 2,    // x坐标设在画布中间
+    y: height - 50,  // y坐标设在画布底部上方50像素
+    size: 50,        // 飞机大小
+    speed: 5,        // 移动速度
+    angle: 0         // 旋转角度
+  };
+}
+
+/**
+ * draw函数每一帧都会执行
+ * 负责更新游戏状态和绘制游戏画面
+ */
+function draw() {
+  if (gameState === 'loading') {
+    // 显示加载界面
+    background(0);
+    fill(255);
+    textSize(30);
+    if (loadError) {
+      text("图片加载失败: " + loadErrorMsg, width/2, height/2 - 30);
+      text("请刷新页面重试", width/2, height/2 + 30);
+    } else {
+      text("加载中... " + Math.floor((loadedImages / totalImages) * 100) + "%", width/2, height/2);
+    }
+    return;
+  }
+
+  // 游戏正常运行时的背景
+  try {
+    if (bgImage) {
+      image(bgImage, width/2, height/2, width, height);
+    } else {
+      background(135, 206, 250); // 如果背景图未加载，使用默认背景色
+    }
+  } catch (e) {
+    console.error('绘制背景时出错:', e);
+    background(135, 206, 250);
+  }
+
+  if (gameState === 'start') {
+    // 绘制开始界面
+    fill(255, 105, 180);    // 设置粉色填充
+    rect(startButton.x - startButton.w / 2, startButton.y - startButton.h / 2, 
+         startButton.w, startButton.h, 10); // 绘制圆角矩形按钮
+    fill(255);              // 设置白色填充
+    textSize(30);           // 设置文字大小
+    text("开始", startButton.x, startButton.y); // 绘制"开始"文字
+
+  } else if (gameState === 'playing') {
+    // 每60帧生成一个新的敌机
+    if (frameCount % 120 === 0) {
+      let x = random(50, width - 50);  // 随机生成敌机的x坐标
+      let char = String.fromCharCode(65 + floor(random(26))); // 随机生成A-Z字母
+      // 创建新的敌机对象
+      enemies.push({ 
+        x: x, 
+        y: -30,  // 从画面上方稍微偏上的位置开始
+        char: char, 
+        size: 60,  // 调整敌机大小
+        speed: random(1, 2),  // 随机速度
+        spriteIndex: floor(random(9)) // 随机选择一个敌机样式
+      });
+    }
+
+    // 更新和绘制所有敌机
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      let enemy = enemies[i];
+      enemy.y += enemy.speed;  // 敌机向下移动
+
+      // 绘制敌机图片（使用精灵图）
+      drawEnemySprite(enemy.spriteIndex, enemy.x, enemy.y, enemy.size);
+      
+      // 绘制敌机上的字母
+      fill(255);
+      stroke(0);
+      strokeWeight(2);
+      textSize(24);  // 固定字母大小
+      text(enemy.char, enemy.x, enemy.y);
+
+      // 检查敌机是否到达底部
+      if (enemy.y > height + 30) {  // 完全离开屏幕才结束
+        gameState = 'gameOver';
+      }
+    }
+
+    // 更新和绘制所有子弹
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      let bullet = bullets[i];
+      if (bullet.target) {
+        // 计算子弹到目标的方向
+        let dx = bullet.target.x - bullet.x;
+        let dy = bullet.target.y - bullet.y;
+        let mag = sqrt(dx * dx + dy * dy);
+        if (mag > 0) {
+          bullet.x += (dx / mag) * bullet.speed;
+          bullet.y += (dy / mag) * bullet.speed;
+        }
+      } else {
+        // 如果没有目标，子弹沿着发射时的方向继续移动
+        bullet.x += bullet.speed * sin(player.angle - PI/2);
+        bullet.y -= bullet.speed * cos(player.angle - PI/2);
+      }
+
+      // 绘制子弹
+      fill(0, 255, 0);
+      ellipse(bullet.x, bullet.y, bullet.size, bullet.size);
+
+      // 检查子弹与敌机的碰撞
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        let enemy = enemies[j];
+        if (bullet.char === enemy.char && 
+            dist(bullet.x, bullet.y, enemy.x, enemy.y) < (bullet.size + enemy.size) / 2) {
+          // 击中敌机时，删除所有指向该敌机的子弹
+          bullets = bullets.filter(b => b.target !== enemy);
+          enemies.splice(j, 1);  // 删除被击中的敌机
+          score += 10;           // 增加得分
+          break;
+        }
+      }
+
+      // 删除超出屏幕的子弹
+      if (bullet.y < 0 || bullet.x < 0 || bullet.x > width || bullet.y > height) {
+        bullets.splice(i, 1);
+      }
+    }
+
+    // 绘制玩家飞机
+    push();
+    translate(player.x, player.y);
+    rotate(player.angle);  // 直接使用计算好的角度
+    image(playerImage, 0, 0, player.size, player.size);
+    pop();
+
+    // 显示当前得分
+    fill(255);
+    stroke(0);
+    strokeWeight(2);
+    text("得分: " + score, 70, 30);
+
+  } else if (gameState === 'gameOver') {
+    // 游戏结束界面
+    textSize(40);
+    fill(255, 0, 0);
+    text("游戏结束！按空格键重新开始", width / 2, height / 2);
+    noLoop(); // 停止游戏循环
+  }
+}
+
+/**
+ * mousePressed函数在鼠标点击时触发
+ * 用于处理开始按钮的点击
+ */
+function mousePressed() {
+  if (gameState === 'start') {
+    // 检查是否点击了开始按钮
+    if (mouseX > startButton.x - startButton.w / 2 &&
+        mouseX < startButton.x + startButton.w / 2 &&
+        mouseY > startButton.y - startButton.h / 2 &&
+        mouseY < startButton.y + startButton.h / 2) {
+      gameState = 'playing'; // 开始游戏
+      // 开始播放背景音乐
+      if (bgMusic && musicLoaded) {
+        bgMusic.loop();
+        console.log('开始播放背景音乐');
+      } else {
+        console.warn('背景音乐未加载成功，无法播放');
+      }
+    }
+  }
+}
+
+/**
+ * keyPressed函数在键盘按下时触发
+ * 用于处理游戏重新开始和发射子弹
+ */
+function keyPressed() {
+  // 处理游戏结束时按空格重新开始
+  if (key === ' ' && gameState === 'gameOver') {
+    enemies = [];     // 清空敌机
+    bullets = [];     // 清空子弹
+    score = 0;        // 重置得分
+    gameState = 'playing'; // 重新开始游戏
+    player.angle = 0; // 重置飞机角度
+    loop();           // 重新开始游戏循环
+    // 重新开始播放背景音乐
+    if (bgMusic && musicLoaded) {
+      bgMusic.loop();
+      console.log('重新开始播放背景音乐');
+    }
+  }
+
+  // 在游戏进行中按下字母键发射子弹
+  if (gameState === 'playing' && key.match(/^[A-Za-z]$/)) {
+    let char = key.toUpperCase(); // 将按键转换为大写字母
+    let target = null;
+    
+    // 查找与按键对应的敌机作为目标
+    for (let enemy of enemies) {
+      if (enemy.char === char) {
+        target = enemy;
+        break;
+      }
+    }
+
+    // 如果找到目标，计算飞机朝向
+    if (target) {
+      let dx = target.x - player.x;
+      let dy = target.y - player.y;
+      // 因为飞机朝上，所以需要从-90度开始旋转
+      player.angle = atan2(dy, dx) + PI/2;
+    }
+
+    // 计算子弹发射位置（从飞机头部发射）
+    let bulletStartX = player.x + sin(player.angle - PI/2) * player.size/2;
+    let bulletStartY = player.y - cos(player.angle - PI/2) * player.size/2;
+
+    // 创建新的子弹
+    bullets.push({
+      x: bulletStartX,
+      y: bulletStartY,
+      char: char,
+      speed: 7,
+      size: 10,
+      target: target
+    });
+  }
+}
+</script>
+</body>
+</html>
